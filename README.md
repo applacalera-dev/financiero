@@ -2,9 +2,12 @@
 
 Aplicación web estática para cargar el archivo Excel mensual y generar el informe financiero en COP y USD.
 
-## Abrir el informe
+## Accesos directos
 
-- Sitio publicado: https://applacalera-dev.github.io/financiero/
+- Herramienta para compartir: https://applacalera-dev.github.io/financiero/
+- Repositorio: https://github.com/applacalera-dev/financiero
+- Editar las TRM: https://github.com/applacalera-dev/financiero/edit/main/trm.json
+- Revisar publicaciones: https://github.com/applacalera-dev/financiero/actions
 - El Excel se procesa localmente en el navegador y no se incluye en este repositorio.
 
 ## Actualizar las TRM sin editar el HTML
