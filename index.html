@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BI CEO - Análisis Mensual</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root { --page-gutter: clamp(0.5rem, 1.25vw, 1.5rem); --panel-gutter: clamp(0.75rem, 1.5vw, 1.5rem); }
+        html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        header { gap: 1rem; flex-wrap: wrap; }
+        header > div:last-child, #currencySelector { min-width: 0; flex-wrap: wrap; }
+        #reportContainer { width: 100%; max-width: none !important; margin: 0; padding: var(--page-gutter) !important; }
+        #dashboard-content { width: 100%; min-width: 0; padding: var(--panel-gutter) !important; }
+        .tab-content, .chart-container, .grid > * { min-width: 0; }
+        #tblYoyContainer, #tblClientTypeContainer, #tblProdContainer, #tblRankingContainer, #tblSaldosContainer, #tblSaldosPctContainer { width: 100%; max-width: 100%; }
+        @media (min-width: 1200px) {
+            #tblYoyContainer table, #tblClientTypeContainer table, #tblProdContainer table, #tblRankingContainer table, #tblSaldosContainer table, #tblSaldosPctContainer table { font-size: clamp(0.58rem, 0.58vw, 0.72rem); line-height: 1.15; }
+            #tblYoyContainer th, #tblYoyContainer td, #tblClientTypeContainer th, #tblClientTypeContainer td, #tblProdContainer th, #tblProdContainer td, #tblRankingContainer th, #tblRankingContainer td, #tblSaldosContainer th, #tblSaldosContainer td, #tblSaldosPctContainer th, #tblSaldosPctContainer td { padding: 0.35rem 0.25rem !important; }
+            #tblYoyContainer th:not(:first-child), #tblYoyContainer td:not(:first-child), #tblClientTypeContainer th:not(:first-child), #tblClientTypeContainer td:not(:first-child), #tblProdContainer th:not(:first-child), #tblProdContainer td:not(:first-child), #tblRankingContainer th:not(:first-child), #tblRankingContainer td:not(:first-child), #tblSaldosContainer th:not(:first-child), #tblSaldosContainer td:not(:first-child), #tblSaldosPctContainer th:not(:first-child), #tblSaldosPctContainer td:not(:first-child) { white-space: nowrap; }
+        }
+        .tab-btn.active { border-bottom: 2px solid #2563eb; color: #2563eb; font-weight: bold; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @media print { .no-print { display: none !important; } .print-break { page-break-before: always; } }
+        .pdf-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; justify-content: center; align-items: center; }
+        .pdf-modal { background: #fff; border-radius: 12px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 400px; width: 90%; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <header class="bg-slate-900 text-white p-4 shadow-md flex justify-between items-center no-print">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight">BI EXECUTIVO MENSUAL V2.0</h1>
+            <p class="text-xs text-slate-400">Análisis de Datos Estratégicos Mensuales</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="bg-slate-800 p-2 rounded-md flex items-center gap-2">
+                <label for="fileUpload" class="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-semibold transition">Cargar Excel</label>
+                <input type="file" id="fileUpload" accept=".xlsx, .xls" class="hidden">
+                <span id="fileName" class="text-sm text-slate-300 w-32 truncate">Sin archivo</span>
+            </div>
+            <div id="currencySelector" class="hidden items-center gap-2 bg-slate-800 p-2 rounded-md">
+                <span class="text-xs text-slate-300 border-r border-slate-600 pr-2">TRM 2026: Ene $3.670,47 | Feb $3.766,30 | Mar $3.669,96 | Abr $3.621,86 | May $3.678,15 | Jun $3.443,59 | Jul $3.132,42 | Ago $3.202,79</span>
+                <span class="text-sm ml-2">Moneda:</span>
+                <select id="viewCurrency" class="bg-slate-700 text-white border-none rounded text-sm p-1">
+                    <option value="COP">Solo COP</option>
+                    <option value="USD">Solo USD</option>
+                    <option value="BOTH">Ambos</option>
+                </select>
+            </div>
+            <div id="exportOptions" class="hidden items-center gap-2">
+                <button onclick="showPDFModal()" class="bg-red-600 hover:bg-red-500 px-3 py-2 rounded text-sm font-bold shadow">PDF</button>
+            </div>
+        </div>
+    </header>
+
+    <div id="loading" class="hidden justify-center items-center p-20 no-print">
+        <div class="loader"></div>
+        <span class="ml-4 font-semibold text-gray-600">Procesando datos mensuales...</span>
+    </div>
+
+    <main id="reportContainer" class="hidden w-full max-w-none mx-auto">
+        <div class="flex border-b border-gray-300 mb-6 no-print flex-wrap">
+            <button class="tab-btn active px-4 py-2" onclick="switchTab('tab-global', this)">1. Resumen Global</button>
+            <button class="tab-btn px-4 py-2" onclick="switchTab('tab-productos', this)">2. Análisis Productos</button>
+            <button class="tab-btn px-4 py-2" onclick="switchTab('tab-clientes', this)">3. Comportamiento Clientes</button>
+            <button class="tab-btn px-4 py-2" onclick="switchTab('tab-explorador', this)">4. Explorador Dinámico</button>
+            <button class="tab-btn px-4 py-2" onclick="switchTab('tab-saldos', this)">5. Análisis Saldos por Sede</button>
+        </div>
+
+        <div id="dashboard-content" class="bg-white p-8 rounded-lg shadow-sm border border-gray-200">
+
+            <!-- PESTAÑA 1 -->
+            <div id="tab-global" class="tab-content block">
+                <h2 class="text-2xl font-bold border-b pb-2 mb-6">1. Crecimiento Mensual: Cajas vs Valores (% Var Mensual)</h2>
+                <div id="globalAccumulatedCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="chart-container relative bg-gray-50 p-4 border rounded h-80">
+                        <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                            <button onclick="downloadChart('chartYoyValues', 'Crecimiento_Valores', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                            <button onclick="downloadChart('chartYoyValues', 'Crecimiento_Valores', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                        </div>
+                        <canvas id="chartYoyValues"></canvas>
+                    </div>
+                    <div class="chart-container relative bg-gray-50 p-4 border rounded h-80">
+                        <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                            <button onclick="downloadChart('chartYoyBoxes', 'Crecimiento_Cajas', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                            <button onclick="downloadChart('chartYoyBoxes', 'Crecimiento_Cajas', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                        </div>
+                        <canvas id="chartYoyBoxes"></canvas>
+                    </div>
+                </div>
+                <div class="mt-8 relative">
+                    <div class="flex justify-end gap-2 mb-2 no-print">
+                        <button onclick="restoreRows('tblYoyBody')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                        <button onclick="downloadTableImage('tblYoyContainer', 'Resumen_Global', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadTableImage('tblYoyContainer', 'Resumen_Global', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <div id="tblYoyContainer" class="bg-white p-2 border border-transparent">
+                        <table class="min-w-full text-sm text-left border-collapse border border-gray-300">
+                            <thead class="bg-gray-100 font-bold" id="tblYoyHead"></thead>
+                            <tbody id="tblYoyBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="print-break my-12 border-t-2 border-dashed border-gray-300"></div>
+                <h2 class="text-2xl font-bold border-b pb-2 mb-6 mt-8">2. Posición de Ventas por Tipo de Cliente</h2>
+                <div class="flex flex-col gap-8">
+                    <div class="chart-container relative bg-gray-50 p-4 border rounded flex justify-center h-96">
+                        <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                            <button onclick="downloadChart('chartClientType', 'Tipo_Clientes', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                            <button onclick="downloadChart('chartClientType', 'Tipo_Clientes', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                        </div>
+                        <canvas id="chartClientType"></canvas>
+                    </div>
+                    <div class="relative">
+                        <div class="flex justify-end gap-2 mb-2 no-print">
+                            <button onclick="restoreRows('tblClientType')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                            <button onclick="downloadTableImage('tblClientTypeContainer', 'Ventas_Clientes', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                            <button onclick="downloadTableImage('tblClientTypeContainer', 'Ventas_Clientes', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                        </div>
+                        <div id="tblClientTypeContainer" class="overflow-x-auto bg-white p-2 border border-transparent">
+                            <table class="min-w-full text-sm text-left border-collapse border border-gray-300">
+                                <thead class="bg-gray-100 font-bold" id="tblClientTypeHead"></thead>
+                                <tbody id="tblClientType" class="divide-y divide-gray-200"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PESTAÑA 2 -->
+            <div id="tab-productos" class="tab-content hidden">
+                <h2 class="text-2xl font-bold border-b pb-2 mb-6">3. Participación de Frutas (Mes a Mes)</h2>
+                <div class="mb-4 bg-slate-100 p-4 rounded no-print">
+                    <label class="font-bold text-sm block mb-1">Filtrar Producto para Gráfico (Multiselección):</label>
+                    <select id="filterProductTab2" multiple class="border p-2 rounded w-full h-24 shadow-sm" onchange="renderProducts()"></select>
+                    <p class="text-xs text-gray-500 mt-1">Ctrl/Cmd para selección múltiple. Sin selección = todos los productos cargados.</p>
+                </div>
+                <div class="chart-container relative bg-gray-50 p-4 border rounded mb-6 h-96">
+                    <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                        <button onclick="downloadChart('chartProducts', 'Participacion_Frutas', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadChart('chartProducts', 'Participacion_Frutas', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <canvas id="chartProducts"></canvas>
+                </div>
+                <h3 class="text-lg font-bold border-b pb-2 mb-4 mt-6 text-indigo-800">📋 Tabla Detallada de Productos</h3>
+                <div class="mb-4 bg-indigo-50 p-4 rounded no-print flex flex-wrap gap-4 items-end">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm font-bold mb-1 text-indigo-800">Filtrar Tabla por Mes:</label>
+                        <select id="filterMonthTab2" class="w-full p-2 border rounded shadow-sm" onchange="renderProducts()"><option value="TODOS">TODOS LOS MESES</option></select>
+                    </div>
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm font-bold mb-1 text-indigo-800">Comparar con Mes:</label>
+                        <select id="filterMonthCompareTab2" class="w-full p-2 border rounded shadow-sm" onchange="renderProducts()"><option value="NINGUNO">Sin comparación</option></select>
+                    </div>
+                    <div class="flex-1 min-w-[150px]">
+                        <label class="block text-sm font-bold mb-1 text-indigo-800">Ordenar por:</label>
+                        <select id="sortOrderTab2" class="w-full p-2 border rounded shadow-sm" onchange="renderProducts()">
+                            <option value="CAJAS_DESC">Cajas (Mayor a Menor)</option>
+                            <option value="CAJAS_ASC">Cajas (Menor a Mayor)</option>
+                            <option value="VALOR_DESC">Valor (Mayor a Menor)</option>
+                            <option value="VALOR_ASC">Valor (Menor a Mayor)</option>
+                        </select>
+                    </div>
+                    <p class="text-xs text-indigo-600 w-full">💡 Un solo mes = ordenado mayor a menor por cajas. Dos meses = comparación lado a lado.</p>
+                </div>
+                <div class="relative">
+                    <div class="flex justify-end gap-2 mb-2 no-print">
+                        <button onclick="restoreRows('tblProdBody')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                        <button onclick="downloadTableImage('tblProdContainer', 'Analisis_Productos', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadTableImage('tblProdContainer', 'Analisis_Productos', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <div id="tblProdContainer" class="overflow-x-auto bg-white p-2 border border-transparent">
+                        <table class="min-w-full text-sm text-left border-collapse border border-gray-300">
+                            <thead class="bg-gray-100 font-bold" id="tblProdHead"></thead>
+                            <tbody id="tblProdBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <h3 class="text-xl font-bold border-b pb-2 mb-4 mt-8 text-slate-800">Fruta Líder por Mes (% Participación en Cajas sobre Total)</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6" id="topFruitPerMonthContainer"></div>
+            </div>
+
+            <!-- PESTAÑA 3 -->
+            <div id="tab-clientes" class="tab-content hidden">
+                <h2 class="text-2xl font-bold border-b pb-2 mb-6">4. Comportamiento Dinámico Multidimensional</h2>
+                <div class="flex flex-wrap gap-4 mb-6 bg-slate-100 p-4 rounded no-print">
+                    <div class="flex-1 min-w-[200px]"><label class="block text-sm font-bold mb-1">Cliente:</label><select id="filterClient" class="w-full p-2 border rounded shadow-sm" onchange="onFilterChange('client')"></select></div>
+                    <div class="flex-1 min-w-[200px]"><label class="block text-sm font-bold mb-1">Producto:</label><select id="filterProduct" class="w-full p-2 border rounded shadow-sm" onchange="onFilterChange('product')"></select></div>
+                    <div class="flex-1 min-w-[150px]"><label class="block text-sm font-bold mb-1">Mes:</label><select id="filterMonth" class="w-full p-2 border rounded shadow-sm" onchange="onFilterChange('month')"></select></div>
+                </div>
+                <div class="chart-container relative bg-gray-50 p-4 border rounded mb-6 h-80">
+                    <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                        <button onclick="downloadChart('chartTab3', 'Comportamiento_Filtros', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadChart('chartTab3', 'Comportamiento_Filtros', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <canvas id="chartTab3"></canvas>
+                </div>
+                <div class="relative">
+                    <div class="flex justify-end gap-2 mb-2 no-print">
+                        <button onclick="restoreRows('tblClientBody')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                        <button onclick="downloadTableImage('tblClientBodyContainer', 'Comportamiento_Cliente', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadTableImage('tblClientBodyContainer', 'Comportamiento_Cliente', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <div id="tblClientBodyContainer" class="overflow-x-auto h-[400px] overflow-y-auto border border-gray-300 rounded bg-white">
+                        <table class="min-w-full text-sm text-left border-collapse">
+                            <thead class="bg-gray-800 text-white font-bold sticky top-0"><tr><th class="border p-2">Periodo</th><th class="border p-2 text-right">Cajas</th><th class="border p-2 text-right">Valor</th></tr></thead>
+                            <tbody id="tblClientBody" class="divide-y divide-gray-200 bg-white"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <h3 class="text-xl font-bold border-b pb-2 mb-4 mt-8 text-slate-800">Ranking Ventas por Cliente</h3>
+                <div class="relative mb-6">
+                    <div class="flex justify-end gap-2 mb-2 no-print">
+                        <button onclick="restoreRows('tblRankingBody')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                        <button onclick="downloadTableImage('tblRankingContainer', 'Ranking_Clientes', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadTableImage('tblRankingContainer', 'Ranking_Clientes', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <div id="tblRankingContainer" class="overflow-x-auto h-[400px] overflow-y-auto border border-gray-300 rounded bg-white">
+                        <table class="min-w-full text-sm text-left border-collapse">
+                            <thead class="bg-slate-700 text-white font-bold sticky top-0" id="tblRankingHead"></thead>
+                            <tbody id="tblRankingBody" class="divide-y divide-gray-200 bg-white"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6" id="clientPartContainer"></div>
+            </div>
+
+            <!-- PESTAÑA 4 -->
+            <div id="tab-explorador" class="tab-content hidden no-print">
+                <h2 class="text-2xl font-bold border-b pb-2 mb-6">5. Explorador Dinámico por Cliente</h2>
+                <div class="flex gap-4 mb-6 bg-slate-100 p-4 rounded">
+                    <div class="flex-1"><label class="block text-sm font-bold mb-1">Cliente:</label><select id="selectDynamicClient" class="w-full p-2 border rounded" onchange="renderDynamicExplorer()"></select></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="chart-container relative bg-gray-50 p-4 border rounded h-80">
+                        <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                            <button onclick="downloadChart('chartDynamicClient', 'Evolucion_Cliente', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                            <button onclick="downloadChart('chartDynamicClient', 'Evolucion_Cliente', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                        </div>
+                        <canvas id="chartDynamicClient"></canvas>
+                    </div>
+                    <div class="relative">
+                        <div class="flex justify-end gap-2 mb-2 no-print">
+                            <button onclick="restoreRows('tblDynamicClient')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                            <button onclick="downloadTableImage('tblDynamicClientContainer', 'Detalle_Cliente', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                            <button onclick="downloadTableImage('tblDynamicClientContainer', 'Detalle_Cliente', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                        </div>
+                        <div id="tblDynamicClientContainer" class="overflow-y-auto h-80 border border-gray-300 rounded bg-white">
+                            <table class="min-w-full text-sm text-left border-collapse">
+                                <thead class="bg-gray-200 font-bold sticky top-0"><tr><th class="border p-2">Producto</th><th class="border p-2">Mes</th><th class="border p-2">Cajas</th><th class="border p-2">Valor</th></tr></thead>
+                                <tbody id="tblDynamicClient" class="divide-y divide-gray-200"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PESTAÑA 5 -->
+            <div id="tab-saldos" class="tab-content hidden">
+                <h2 class="text-2xl font-bold border-b pb-2 mb-6">6. Análisis de Saldos por Sede (Cajas)</h2>
+                <p class="text-sm text-gray-600 mb-4">Ventas sin dato en SALDO = venta completa (full). Con saldo = saldo pendiente. Análisis sobre <strong>cajas</strong>.</p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" id="saldoResumenCards"></div>
+                <div class="chart-container relative bg-gray-50 p-4 border rounded mb-6 h-96">
+                    <div class="absolute top-2 right-2 flex gap-1 no-print z-10">
+                        <button onclick="downloadChart('chartSaldos', 'Saldos_por_Sede_Cajas', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadChart('chartSaldos', 'Saldos_por_Sede_Cajas', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <canvas id="chartSaldos"></canvas>
+                </div>
+                <div class="relative">
+                    <div class="flex justify-end gap-2 mb-2 no-print">
+                        <button onclick="restoreRows('tblSaldosBody')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                        <button onclick="downloadTableImage('tblSaldosContainer', 'Saldos_Sede_Cajas', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadTableImage('tblSaldosContainer', 'Saldos_Sede_Cajas', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <div id="tblSaldosContainer" class="overflow-x-auto bg-white p-2 border border-transparent">
+                        <table class="min-w-full text-sm text-left border-collapse border border-gray-300">
+                            <thead class="bg-gray-100 font-bold" id="tblSaldosHead"></thead>
+                            <tbody id="tblSaldosBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <h3 class="text-xl font-bold border-b pb-2 mb-4 mt-8 text-slate-800">% Saldo (Cajas) por Sede y Mes</h3>
+                <div class="relative">
+                    <div class="flex justify-end gap-2 mb-2 no-print">
+                        <button onclick="restoreRows('tblSaldosPctBody')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow">🔄 Mostrar Todas</button>
+                        <button onclick="downloadTableImage('tblSaldosPctContainer', 'Pct_Saldos_Sede_Cajas', 'light')" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded shadow">☀️ JPG</button>
+                        <button onclick="downloadTableImage('tblSaldosPctContainer', 'Pct_Saldos_Sede_Cajas', 'dark')" class="text-xs bg-slate-800 text-white hover:bg-slate-700 px-2 py-1 rounded shadow">🌙 JPG</button>
+                    </div>
+                    <div id="tblSaldosPctContainer" class="overflow-x-auto bg-white p-2 border border-transparent">
+                        <table class="min-w-full text-sm text-left border-collapse border border-gray-300">
+                            <thead class="bg-gray-100 font-bold" id="tblSaldosPctHead"></thead>
+                            <tbody id="tblSaldosPctBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <div id="pdfModal" class="pdf-modal-overlay hidden no-print">
+        <div class="pdf-modal">
+            <h2 class="text-xl font-bold mb-4 text-slate-800">📤 Exportar a PDF</h2>
+            <p class="text-sm text-gray-600 mb-6">Seleccione qué desea exportar:</p>
+            <div class="flex flex-col gap-3">
+                <button onclick="exportToPDFFinal('current')" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded font-bold transition">📄 Hoja Actual</button>
+                <button onclick="exportToPDFFinal('all')" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded font-bold transition">📑 Informe Completo</button>
+                <button onclick="closePDFModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded font-bold transition mt-2">Cancelar</button>
+            </div>
+            <p class="text-xs text-gray-400 mt-4">💡 Tablas anchas se rotarán a horizontal automáticamente.</p>
+        </div>
+    </div>
+
+    <div id="trmModal" class="pdf-modal-overlay hidden no-print">
+        <div class="pdf-modal" style="max-width: 500px;">
+            <h2 class="text-xl font-bold mb-2 text-slate-800">💰 TRM Faltante</h2>
+            <p class="text-sm text-gray-600 mb-4">Se detectaron meses sin TRM configurada. Ingrese el valor de la TRM para cada mes:</p>
+            <div id="trmInputs" class="flex flex-col gap-3 mb-4 max-h-60 overflow-y-auto"></div>
+            <div class="flex gap-2">
+                <button onclick="saveTRMsAndProcess()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold transition flex-1">✓ Continuar</button>
+                <button onclick="closeTRMModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded font-bold transition">Cancelar</button>
+            </div>
+            <p class="text-xs text-gray-400 mt-3">💡 La TRM se usa para convertir valores de COP a USD.</p>
+        </div>
+    </div>
+
+<script>
+Chart.register(ChartDataLabels);
+const ROW_CHECKBOX = '<input type="checkbox" class="row-selector cursor-pointer mr-2 no-print" title="Seleccionar para descargar">';
+function restoreRows(tbodyId) { document.querySelectorAll('#'+tbodyId+' tr').forEach(tr => tr.style.display = ''); document.querySelectorAll('#'+tbodyId+' .row-selector').forEach(cb => cb.checked = false); }
+const MONTH_NAMES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const MONTH_NAMES_SHORT = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+function normalizeMonth(val) { if (val == null || val === '') return null; let n = parseInt(val); if (!isNaN(n) && n >= 1 && n <= 12) return n; if (typeof val === 'string') { let clean = val.trim().toUpperCase(); let idx = MONTH_NAMES.findIndex(m => m && m.toUpperCase() === clean); if (idx > 0) return idx; idx = MONTH_NAMES_SHORT.findIndex(m => m && m.toUpperCase() === clean); if (idx > 0) return idx; if (clean.length >= 3) { idx = MONTH_NAMES.findIndex(m => m && m.toUpperCase().startsWith(clean.substring(0,3))); if (idx > 0) return idx; } } return null; }
+const fixedMonthlyTRMs = { 1:3670.47, 2:3766.30, 3:3669.96, 4:3621.86, 5:3678.15, 6:3443.59, 7:3132.42, 8:3202.79 };
+const REMOTE_TRM_URL = 'https://applacalera-dev.github.io/financiero/trm.json';
+let trmConfigSource = 'tasas integradas en el informe';
+async function loadTRMConfig() {
+    const urls = location.protocol === 'file:' ? [REMOTE_TRM_URL] : ['./trm.json', REMOTE_TRM_URL];
+    for (const url of urls) {
+        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+            const response = await fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now(), {cache:'no-store', signal:controller.signal});
+            if (!response.ok) throw new Error('HTTP '+response.status);
+            const config = await response.json(), rates = config.trm || config.rates || config;
+            let loaded = 0;
+            Object.entries(rates).forEach(([key,value]) => { let month=normalizeMonth(key), rate=parseFloat(value); if(month&&Number.isFinite(rate)&&rate>0){fixedMonthlyTRMs[month]=rate;loaded++;} });
+            if (loaded > 0) { trmConfigSource = url.startsWith('http') ? 'trm.json de GitHub' : 'trm.json del sitio'; return true; }
+        } catch (error) { console.warn('No se pudo cargar TRM desde '+url, error.message); }
+        finally { clearTimeout(timeout); }
+    }
+    return false;
+}
+const trmConfigPromise = loadTRMConfig();
+let rawData = [], monthsAvailable = [], charts = {}, activeTabId = 'tab-global';
+let state = { trm: {}, currencyMode: 'COP', dataByMonth: {}, dataByChannel: {}, dataByProduct: {}, dataByClient: {}, dataBySede: {} };
+
+document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
+document.getElementById('viewCurrency').addEventListener('change', (e) => { state.currencyMode = e.target.value; renderAll(); });
+
+async function handleFileUpload(e) {
+    const file = e.target.files[0]; if (!file) return;
+    document.getElementById('fileName').innerText = file.name;
+    document.getElementById('loading').style.display = 'flex';
+    document.getElementById('reportContainer').style.display = 'none';
+    await trmConfigPromise;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type:'array'});
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        let arrData = XLSX.utils.sheet_to_json(worksheet, {header: 1, defval: ""});
+        let headers = arrData[0] || [];
+        let saldoColIdx = -1;
+        headers.forEach((h, idx) => { if (h && h.toString().trim().toUpperCase().includes('SALDO')) saldoColIdx = idx; });
+        console.log('=== DEBUG SALDO ==='); console.log('Headers:', headers); console.log('SALDO column index:', saldoColIdx);
+        let json = XLSX.utils.sheet_to_json(worksheet, {defval:""});
+        rawData = json.map((row, rowIdx) => {
+            let newRow = {};
+            for (let key in row) { newRow[key.trim().toUpperCase()] = row[key]; }
+            newRow.MES = normalizeMonth(newRow.MES);
+            if (newRow.SALDO === undefined && saldoColIdx >= 0) { newRow.SALDO = arrData[rowIdx + 1] ? arrData[rowIdx + 1][saldoColIdx] : ""; }
+            return newRow;
+        }).filter(r => r.MES != null && r.MES > 0 && r.TERCERO != null && r.VALOR != null);
+        console.log('Sample SALDO values:', rawData.slice(0, 10).map(r => ({SALDO: r.SALDO, type: typeof r.SALDO})));
+        detectMonthsAndTRM();
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function detectMonthsAndTRM() {
+    let months = new Set(); rawData.forEach(r => { let m = parseInt(r.MES); if (!isNaN(m) && m >= 1 && m <= 12) months.add(m); });
+    monthsAvailable = Array.from(months).sort((a,b) => a-b);
+    let missingTRMs = monthsAvailable.filter(m => !fixedMonthlyTRMs[m]);
+    if (missingTRMs.length > 0) { showTRMModal(missingTRMs); } else { monthsAvailable.forEach(m => { state.trm[m] = fixedMonthlyTRMs[m]; }); updateTRMDisplay(); finishLoading(); }
+}
+function showTRMModal(missingMonths) {
+    let container = document.getElementById('trmInputs'); container.innerHTML = '';
+    missingMonths.forEach(m => { let div = document.createElement('div'); div.className = 'flex items-center gap-2'; div.innerHTML = '<label class="text-sm font-bold w-32">' + getMonthLabel(m) + ':</label><input type="number" step="0.01" id="trmInput_' + m + '" value="4000" class="border rounded p-2 flex-1 text-sm" placeholder="TRM"><span class="text-xs text-gray-500">COP/USD</span>'; container.appendChild(div); });
+    document.getElementById('trmModal').classList.remove('hidden');
+}
+function closeTRMModal() { document.getElementById('trmModal').classList.add('hidden'); document.getElementById('loading').style.display = 'none'; document.getElementById('fileUpload').value = ''; document.getElementById('fileName').innerText = 'Sin archivo'; }
+function saveTRMsAndProcess() {
+    monthsAvailable.forEach(m => { let input = document.getElementById('trmInput_' + m); if (input) { let val = parseFloat(input.value); state.trm[m] = (val && val > 0) ? val : 4000; fixedMonthlyTRMs[m] = state.trm[m]; } else { state.trm[m] = fixedMonthlyTRMs[m] || 4000; } });
+    document.getElementById('trmModal').classList.add('hidden'); updateTRMDisplay(); finishLoading();
+}
+function updateTRMDisplay() { let trmText = monthsAvailable.map(m => MONTH_NAMES_SHORT[m] + ' $' + formatTRM(state.trm[m])).join(' | '); let span = document.querySelector('#currencySelector span'); if (span) { span.innerText = 'TRM 2026: ' + trmText; span.title = 'Origen: ' + trmConfigSource; } }
+function finishLoading() { setTimeout(() => { processData(); document.getElementById('loading').style.display = 'none'; document.getElementById('reportContainer').style.display = 'block'; document.getElementById('currencySelector').style.display = 'flex'; document.getElementById('exportOptions').style.display = 'flex'; }, 50); }
+
+function formatMoney(v, c='COP') { if (!v || isNaN(v)) return 0; return new Intl.NumberFormat('es-CO', {style:'currency', currency:c, maximumFractionDigits:0}).format(Math.round(v)); }
+function formatNumber(v) { if (!v || isNaN(v)) return 0; return new Intl.NumberFormat('es-CO', {maximumFractionDigits:0}).format(Math.round(v)); }
+function formatTRM(v) { if (!v || isNaN(v)) return '0,00'; return new Intl.NumberFormat('es-CO', {minimumFractionDigits:2, maximumFractionDigits:2}).format(v); }
+function getMonthLabel(m) { return MONTH_NAMES[m] || 'Mes '+m; }
+function getConverted(value, month) { let v = parseFloat(value)||0; let trm = state.trm[month]||4000; return {cop:v, usd:v/trm}; }
+function renderValueCell(vals) { let h=''; if (state.currencyMode==='COP'||state.currencyMode==='BOTH') h+='<div>'+formatMoney(vals.cop,'COP')+'</div>'; if (state.currencyMode==='USD'||state.currencyMode==='BOTH') h+='<div class="text-blue-600 text-xs">'+formatMoney(vals.usd,'USD')+'</div>'; return h; }
+function getActiveValue(vals) { if (!vals) return 0; return state.currencyMode==='USD' ? (vals.usd||0) : (vals.cop||0); }
+
+function getFilterContext() {
+    let parts = ['Moneda: '+state.currencyMode];
+    let tabLabels = {'tab-global':'Resumen Global','tab-productos':'Análisis Productos','tab-clientes':'Comportamiento Clientes','tab-explorador':'Explorador Dinámico','tab-saldos':'Saldos por Sede'};
+    parts.push(tabLabels[activeTabId]||'Informe');
+    if (activeTabId==='tab-clientes') { let fc=document.getElementById('filterClient')?.value||'TODOS', fp=document.getElementById('filterProduct')?.value||'TODOS', fm=document.getElementById('filterMonth')?.value||'TODOS'; if(fc!=='TODOS')parts.push('Cliente: '+fc); if(fp!=='TODOS')parts.push('Producto: '+fp); if(fm!=='TODOS')parts.push('Mes: '+getMonthLabel(parseInt(fm))); }
+    if (activeTabId==='tab-productos') { let fm2=document.getElementById('filterMonthTab2')?.value||'TODOS'; if(fm2!=='TODOS')parts.push('Mes: '+getMonthLabel(parseInt(fm2))); }
+    if (activeTabId==='tab-explorador') { let dc=document.getElementById('selectDynamicClient')?.value||''; if(dc)parts.push('Cliente: '+dc); }
+    return parts.join(' | ');
+}
+
+function processData() {
+    state.dataByMonth = {}; state.dataByChannel = {}; state.dataByProduct = {}; state.dataByClient = {}; state.dataBySede = {};
+    rawData.forEach(row => {
+        let month = parseInt(row.MES)||0, valCOP = parseFloat(row.VALOR)||0, qty = parseFloat(row.CANTIDAD)||0;
+        let client = (row.TERCERO||'DESCONOCIDO').toString().trim(), product = (row['NOMBRE DE PRODUCTO A PROCESAR']||'SIN PRODUCTO').toString().trim();
+        let canal = (row['TIPO DE CLIENTE']||'OTROS').toString().trim().toUpperCase(), sede = (row.SEDE||'SIN SEDE').toString().trim().toUpperCase();
+        let saldoRaw = row.SALDO;
+        if (saldoRaw === undefined || saldoRaw === null) { for (let key in row) { if (key.includes('SALDO')) { saldoRaw = row[key]; break; } } }
+        let hasSaldo = false; let saldoVal = 0;
+        if (saldoRaw != null && saldoRaw !== undefined && saldoRaw.toString().trim() !== '') {
+            let strVal = saldoRaw.toString().trim(); let numVal = parseFloat(strVal);
+            if (!isNaN(numVal)) { hasSaldo = numVal > 0; saldoVal = numVal; }
+            else { let uv = strVal.toUpperCase(); hasSaldo = uv !== 'FULL' && uv !== 'NO' && uv !== 'N/A' && uv !== ''; }
+        }
+        let vals = getConverted(valCOP, month);
+        if (!state.dataByMonth[month]) state.dataByMonth[month] = {cajas:0,valCOP:0,valUSD:0};
+        state.dataByMonth[month].cajas += qty; state.dataByMonth[month].valCOP += vals.cop; state.dataByMonth[month].valUSD += vals.usd;
+        if (!state.dataByChannel[canal]) state.dataByChannel[canal] = {};
+        if (!state.dataByChannel[canal][month]) state.dataByChannel[canal][month] = {cajas:0,valCOP:0,valUSD:0};
+        state.dataByChannel[canal][month].cajas += qty; state.dataByChannel[canal][month].valCOP += vals.cop; state.dataByChannel[canal][month].valUSD += vals.usd;
+        if (!state.dataByProduct[product]) state.dataByProduct[product] = {};
+        if (!state.dataByProduct[product][month]) state.dataByProduct[product][month] = {cajas:0,valCOP:0,valUSD:0};
+        state.dataByProduct[product][month].cajas += qty; state.dataByProduct[product][month].valCOP += vals.cop; state.dataByProduct[product][month].valUSD += vals.usd;
+        if (!state.dataByClient[client]) state.dataByClient[client] = {months:{},products:{}};
+        if (!state.dataByClient[client].months[month]) state.dataByClient[client].months[month] = {cajas:0,valCOP:0,valUSD:0};
+        state.dataByClient[client].months[month].cajas += qty; state.dataByClient[client].months[month].valCOP += vals.cop; state.dataByClient[client].months[month].valUSD += vals.usd;
+        if (!state.dataByClient[client].products[product]) state.dataByClient[client].products[product] = {};
+        if (!state.dataByClient[client].products[product][month]) state.dataByClient[client].products[product][month] = {cajas:0,valCOP:0,valUSD:0};
+        state.dataByClient[client].products[product][month].cajas += qty; state.dataByClient[client].products[product][month].valCOP += vals.cop; state.dataByClient[client].products[product][month].valUSD += vals.usd;
+        if (!state.dataBySede[sede]) state.dataBySede[sede] = {};
+        if (!state.dataBySede[sede][month]) state.dataBySede[sede][month] = {cajas:0,valCOP:0,valUSD:0,saldoCOP:0,saldoUSD:0,valSaldoCOP:0,valSaldoUSD:0,countTotal:0,countSaldo:0,countFull:0,valFullCOP:0,valFullUSD:0,saldoCajas:0,fullCajas:0};
+        state.dataBySede[sede][month].cajas += qty; state.dataBySede[sede][month].valCOP += vals.cop; state.dataBySede[sede][month].valUSD += vals.usd; state.dataBySede[sede][month].countTotal++;
+        if (hasSaldo) { state.dataBySede[sede][month].countSaldo++; state.dataBySede[sede][month].saldoCOP += saldoVal; state.dataBySede[sede][month].saldoUSD += saldoVal/(state.trm[month]||4000); state.dataBySede[sede][month].valSaldoCOP += vals.cop; state.dataBySede[sede][month].valSaldoUSD += vals.usd; state.dataBySede[sede][month].saldoCajas += qty; }
+        else { state.dataBySede[sede][month].countFull++; state.dataBySede[sede][month].valFullCOP += vals.cop; state.dataBySede[sede][month].valFullUSD += vals.usd; state.dataBySede[sede][month].fullCajas += qty; }
+    });
+    let clients = [...new Set(rawData.map(r => r.TERCERO?.toString().trim()))].filter(Boolean).sort();
+    let prods = [...new Set(rawData.map(r => r['NOMBRE DE PRODUCTO A PROCESAR']?.toString().trim()))].filter(Boolean).sort();
+    let clientHtml='<option value="TODOS">TODOS LOS CLIENTES</option>'; clients.forEach(c => clientHtml+='<option value="'+c+'">'+c+'</option>');
+    let prodHtml='<option value="TODOS">TODOS LOS PRODUCTOS</option>'; prods.forEach(p => prodHtml+='<option value="'+p+'">'+p+'</option>');
+    let monthHtml='<option value="TODOS">TODOS LOS MESES</option>'; monthsAvailable.forEach(m => monthHtml+='<option value="'+m+'">'+getMonthLabel(m)+'</option>');
+    document.getElementById('filterClient').innerHTML=clientHtml; document.getElementById('filterProduct').innerHTML=prodHtml; document.getElementById('filterMonth').innerHTML=monthHtml;
+    let prodMultiHtml=''; prods.forEach(p => prodMultiHtml+='<option value="'+p+'">'+p+'</option>'); document.getElementById('filterProductTab2').innerHTML=prodMultiHtml;
+    let mfHtml='<option value="TODOS">TODOS LOS MESES</option>'; monthsAvailable.forEach(m => mfHtml+='<option value="'+m+'">'+getMonthLabel(m)+'</option>'); document.getElementById('filterMonthTab2').innerHTML=mfHtml;
+    let mcHtml='<option value="NINGUNO">Sin comparación</option>'; monthsAvailable.forEach(m => mcHtml+='<option value="'+m+'">'+getMonthLabel(m)+'</option>'); document.getElementById('filterMonthCompareTab2').innerHTML=mcHtml;
+    const sc=document.getElementById('selectDynamicClient'); sc.innerHTML='<option value="">Seleccione un cliente...</option>'; Object.keys(state.dataByClient).sort().forEach(c => sc.innerHTML+='<option value="'+c+'">'+c+'</option>');
+    renderAll();
+}
+
+const WIDE_TABLE_CONTAINER_IDS = ['tblYoyContainer','tblClientTypeContainer','tblProdContainer','tblRankingContainer','tblSaldosContainer','tblSaldosPctContainer'];
+let tableFitFrame = null;
+function scheduleWideTableFit() { if (tableFitFrame) cancelAnimationFrame(tableFitFrame); tableFitFrame = requestAnimationFrame(fitWideTablesToScreen); }
+function fitWideTablesToScreen() {
+    tableFitFrame = null;
+    WIDE_TABLE_CONTAINER_IDS.forEach(id => {
+        const container = document.getElementById(id), table = container?.querySelector('table');
+        if (!container || !table) return;
+        table.style.zoom = '1'; container.style.overflowX = 'auto';
+        if (window.innerWidth < 1200 || container.offsetParent === null) return;
+        const availableWidth = Math.max(0, container.clientWidth - 24), naturalWidth = table.scrollWidth;
+        const scale = naturalWidth > availableWidth ? availableWidth / naturalWidth : 1;
+        if (scale >= 0.65) { table.style.zoom = scale.toFixed(3); container.style.overflowX = 'hidden'; }
+    });
+}
+window.addEventListener('resize', scheduleWideTableFit);
+new MutationObserver(scheduleWideTableFit).observe(document.getElementById('dashboard-content'), {childList:true, subtree:true});
+
+function renderAll() { renderGlobal(); renderProducts(); renderClients(); if(document.getElementById('selectDynamicClient').value) renderDynamicExplorer(); renderSaldos(); scheduleWideTableFit(); }
+
+function renderGlobal() {
+    let tac=0, tacop=0, tausd=0; monthsAvailable.forEach(m => { let d=state.dataByMonth[m]||{cajas:0,valCOP:0,valUSD:0}; tac+=d.cajas; tacop+=d.valCOP; tausd+=d.valUSD; });
+    document.getElementById('globalAccumulatedCards').innerHTML = '<div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 rounded-lg shadow-lg text-center"><p class="text-xs font-bold uppercase tracking-widest mb-2 text-blue-200">TOTAL ACUMULADO CAJAS</p><h3 class="text-3xl font-black">'+formatNumber(tac)+'</h3><p class="text-xs text-blue-200 mt-2">Suma de todos los meses</p></div><div class="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white p-6 rounded-lg shadow-lg text-center"><p class="text-xs font-bold uppercase tracking-widest mb-2 text-emerald-200">TOTAL ACUMULADO COP</p><h3 class="text-3xl font-black">'+formatMoney(tacop,'COP')+'</h3><p class="text-xs text-emerald-200 mt-2">Suma de todos los meses</p></div><div class="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-6 rounded-lg shadow-lg text-center"><p class="text-xs font-bold uppercase tracking-widest mb-2 text-indigo-200">TOTAL ACUMULADO USD</p><h3 class="text-3xl font-black">'+formatMoney(tausd,'USD')+'</h3><p class="text-xs text-indigo-200 mt-2">Suma de todos los meses</p></div>';
+    let hs='<tr><th class="border p-2">Métrica</th>'; monthsAvailable.forEach((m,idx) => { hs+='<th class="border p-2 text-right">'+getMonthLabel(m)+'</th>'; if(idx>0) hs+='<th class="border p-2 text-right bg-blue-100 text-xs">Var %</th>'; }); hs+='<th class="border p-2 text-right bg-blue-200">% Var Total</th></tr>';
+    document.getElementById('tblYoyHead').innerHTML=hs;
+    let rc='<tr><td class="border p-2 font-bold">'+ROW_CHECKBOX+' Cajas</td>', rv='<tr><td class="border p-2 font-bold">'+ROW_CHECKBOX+' Valores</td>', arrC=[], arrV=[], pc=0, pv=0;
+    monthsAvailable.forEach((m,idx) => { let d=state.dataByMonth[m]||{cajas:0,valCOP:0,valUSD:0}; arrC.push(d.cajas); arrV.push({cop:d.valCOP,usd:d.valUSD}); let cv=getActiveValue({cop:d.valCOP,usd:d.valUSD}); rc+='<td class="border p-2 text-right">'+formatNumber(d.cajas)+'</td>'; rv+='<td class="border p-2 text-right">'+renderValueCell({cop:d.valCOP,usd:d.valUSD})+'</td>'; if(idx>0){let vc=pc?((d.cajas/pc)-1)*100:0, vv=pv?((cv/pv)-1)*100:0; rc+='<td class="border p-2 text-right text-xs font-bold '+(vc>=0?'text-green-600':'text-red-600')+'">'+vc.toFixed(0)+'%</td>'; rv+='<td class="border p-2 text-right text-xs font-bold '+(vv>=0?'text-green-600':'text-red-600')+'">'+vv.toFixed(0)+'%</td>';} pc=d.cajas; pv=cv; });
+    let vct=arrC.length>1&&arrC[0]?((arrC[arrC.length-1]/arrC[0])-1)*100:0, avf=getActiveValue(arrV[0]), avl=getActiveValue(arrV[arrV.length-1]), vvt=arrV.length>1&&avf?((avl/avf)-1)*100:0;
+    let colT=(v)=>'<td class="border p-2 text-right bg-blue-50 font-bold '+(v>=0?'text-green-600':'text-red-600')+'">'+v.toFixed(0)+'%</td>';
+    rc+=colT(vct)+'</tr>'; rv+=colT(vvt)+'</tr>';
+    document.getElementById('tblYoyBody').innerHTML=rc+rv;
+    let ml=monthsAvailable.map(m=>getMonthLabel(m));
+    let cdv=monthsAvailable.map(m=>{let d=state.dataByMonth[m]||{valCOP:0,valUSD:0};return getActiveValue({cop:d.valCOP,usd:d.valUSD});});
+    let mvl=[null]; for(let i=1;i<cdv.length;i++){ if(cdv[i-1]&&cdv[i-1]!==0){ mvl.push(((cdv[i]/cdv[i-1])-1)*100); } else { mvl.push(null); } }
+    buildChart('chartYoyValues','bar',ml,[{label:'Valor Ventas',data:cdv,backgroundColor:'#3b82f6',yAxisID:'y'},{label:'% Crecimiento',data:mvl,type:'line',borderColor:'#ef4444',borderWidth:2,fill:false,yAxisID:'y1',spanGaps:true,pointRadius:5,pointHoverRadius:7}],true);
+    let mcvl=[null]; for(let i=1;i<arrC.length;i++){ if(arrC[i-1]&&arrC[i-1]!==0){ mcvl.push(((arrC[i]/arrC[i-1])-1)*100); } else { mcvl.push(null); } }
+    buildChart('chartYoyBoxes','bar',ml,[{label:'Total Cajas',data:arrC,backgroundColor:'#10b981',yAxisID:'y'},{label:'% Crecimiento',data:mcvl,type:'line',borderColor:'#f59e0b',borderWidth:2,fill:false,yAxisID:'y1',spanGaps:true,pointRadius:5,pointHoverRadius:7}],true);
+    let canales=Object.keys(state.dataByChannel);
+    let thC='<tr><th class="border p-2 bg-gray-100">Canal</th>'; monthsAvailable.forEach((m,idx)=>{thC+='<th class="border p-2 text-center bg-gray-50" colspan="2">'+getMonthLabel(m)+'</th>'; if(idx>0)thC+='<th class="border p-2 text-center bg-blue-50 text-xs" colspan="2">Var %</th>';}); thC+='</tr><tr><th class="border p-2 bg-gray-100"></th>'; monthsAvailable.forEach((m,idx)=>{thC+='<th class="border p-2 text-right text-xs">Cajas</th><th class="border p-2 text-right text-xs">Valor</th>'; if(idx>0)thC+='<th class="border p-2 text-right text-xs bg-blue-50">ΔC</th><th class="border p-2 text-right text-xs bg-blue-50">ΔV</th>';}); thC+='</tr>';
+    document.getElementById('tblClientTypeHead').innerHTML=thC;
+    let tbC='', tcm={}, tvcm={}, tvum={}; monthsAvailable.forEach(m=>{tcm[m]=0;tvcm[m]=0;tvum[m]=0;});
+    canales.forEach(c=>{tbC+='<tr><td class="border p-2 font-bold">'+ROW_CHECKBOX+' '+c+'</td>'; let pC=0,pV=0; monthsAvailable.forEach((m,idx)=>{let d=state.dataByChannel[c][m]||{cajas:0,valCOP:0,valUSD:0}; tcm[m]+=d.cajas;tvcm[m]+=d.valCOP;tvum[m]+=d.valUSD; let cv=getActiveValue({cop:d.valCOP,usd:d.valUSD}); tbC+='<td class="border p-2 text-right text-xs">'+formatNumber(d.cajas)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:d.valCOP,usd:d.valUSD})+'</td>'; if(idx>0){let vc=pC?((d.cajas/pC)-1)*100:0,vv=pV?((cv/pV)-1)*100:0; tbC+='<td class="border p-2 text-right text-xs font-bold '+(vc>=0?'text-green-600':'text-red-600')+'">'+vc.toFixed(0)+'%</td><td class="border p-2 text-right text-xs font-bold '+(vv>=0?'text-green-600':'text-red-600')+'">'+vv.toFixed(0)+'%</td>';} pC=d.cajas;pV=cv;}); tbC+='</tr>';});
+    tbC+='<tr class="bg-gray-200 font-bold"><td class="border p-2">TOTAL</td>'; let pTC=0,pTV=0; monthsAvailable.forEach((m,idx)=>{let tc=tcm[m],tvC=tvcm[m],tvU=tvum[m]; let tva=getActiveValue({cop:tvC,usd:tvU}); tbC+='<td class="border p-2 text-right text-xs">'+formatNumber(tc)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:tvC,usd:tvU})+'</td>'; if(idx>0){let vtc=pTC?((tc/pTC)-1)*100:0,vtv=pTV?((tva/pTV)-1)*100:0; tbC+='<td class="border p-2 text-right text-xs '+(vtc>=0?'text-green-600':'text-red-600')+'">'+vtc.toFixed(0)+'%</td><td class="border p-2 text-right text-xs '+(vtv>=0?'text-green-600':'text-red-600')+'">'+vtv.toFixed(0)+'%</td>';} pTC=tc;pTV=tva;}); tbC+='</tr>';
+    document.getElementById('tblClientType').innerHTML=tbC;
+    let dsC=[],colC=['#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#6366f1']; canales.forEach((c,i)=>{let d=monthsAvailable.map(m=>{let x=state.dataByChannel[c][m]||{valCOP:0,valUSD:0};return getActiveValue({cop:x.valCOP,usd:x.valUSD});}); dsC.push({label:c,data:d,backgroundColor:colC[i%colC.length]});});
+    buildChart('chartClientType','bar',ml,dsC,false);
+}
+
+function renderProducts() {
+    let ml=monthsAvailable.map(m=>getMonthLabel(m)), productos=Object.keys(state.dataByProduct).sort();
+    let selMonth=document.getElementById('filterMonthTab2')?.value||'TODOS', selCompare=document.getElementById('filterMonthCompareTab2')?.value||'NINGUNO', selSort=document.getElementById('sortOrderTab2')?.value||'CAJAS_DESC';
+    let datasets=[];
+    let selOpts=Array.from(document.getElementById('filterProductTab2').selectedOptions).map(o=>o.value);
+    productos.forEach((p,index)=>{let cd=monthsAvailable.map(m=>{let d=state.dataByProduct[p][m]||{cajas:0};return d.cajas;}); let sp=selOpts.length===0||selOpts.includes(p); if(sp){let color='hsl('+Math.round((index*137.508)%360)+', 72%, 46%)'; datasets.push({label:p,data:cd,borderColor:color,backgroundColor:color,pointBackgroundColor:color,borderWidth:2,pointRadius:2,pointHoverRadius:5,fill:false,tension:0.1,spanGaps:true});}});
+    let legendColumns=window.innerWidth>=1600?5:(window.innerWidth>=1200?4:(window.innerWidth>=768?3:1));
+    document.getElementById('chartProducts').parentElement.style.height=Math.max(384,300+Math.ceil(datasets.length/legendColumns)*28)+'px';
+    buildChart('chartProducts','line',ml,datasets,false);
+    let tableProducts = selOpts.length > 0 ? productos.filter(p => selOpts.includes(p)) : productos;
+    let tH='',tB='';
+    if(selMonth==='TODOS' && selCompare==='NINGUNO') {
+        tH='<tr><th class="border p-2">Producto</th>'; monthsAvailable.forEach((m,idx)=>{tH+='<th class="border p-2 text-center bg-gray-50" colspan="2">'+getMonthLabel(m)+'</th>'; if(idx>0)tH+='<th class="border p-2 text-center bg-blue-50 text-xs" colspan="2">Var %</th>';}); tH+='</tr><tr><th class="border p-2"></th>'; monthsAvailable.forEach((m,idx)=>{tH+='<th class="border p-2 text-right text-xs">Cajas</th><th class="border p-2 text-right text-xs">Valor</th>'; if(idx>0)tH+='<th class="border p-2 text-right text-xs bg-blue-50">ΔC</th><th class="border p-2 text-right text-xs bg-blue-50">ΔV</th>';}); tH+='</tr>';
+        let tpC={},tpV={},tpU={}; monthsAvailable.forEach(m=>{tpC[m]=0;tpV[m]=0;tpU[m]=0;});
+        tableProducts.forEach(p=>{tB+='<tr><td class="border p-2 font-bold text-xs">'+ROW_CHECKBOX+' '+p+'</td>'; let pC=0,pV=0; monthsAvailable.forEach((m,idx)=>{let d=state.dataByProduct[p][m]||{cajas:0,valCOP:0,valUSD:0}; tpC[m]+=d.cajas;tpV[m]+=d.valCOP;tpU[m]+=d.valUSD; let cv=getActiveValue({cop:d.valCOP,usd:d.valUSD}); tB+='<td class="border p-2 text-right text-xs">'+formatNumber(d.cajas)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:d.valCOP,usd:d.valUSD})+'</td>'; if(idx>0){let vc=pC?((d.cajas/pC)-1)*100:0,vv=pV?((cv/pV)-1)*100:0; tB+='<td class="border p-2 text-right text-xs font-bold '+(vc>=0?'text-green-600':'text-red-600')+'">'+vc.toFixed(0)+'%</td><td class="border p-2 text-right text-xs font-bold '+(vv>=0?'text-green-600':'text-red-600')+'">'+vv.toFixed(0)+'%</td>';} pC=d.cajas;pV=cv;}); tB+='</tr>';});
+        tB+='<tr class="bg-gray-200 font-bold"><td class="border p-2">TOTAL</td>'; let pTC=0,pTV=0; monthsAvailable.forEach((m,idx)=>{tB+='<td class="border p-2 text-right text-xs">'+formatNumber(tpC[m])+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:tpV[m],usd:tpU[m]})+'</td>'; if(idx>0){let vtc=pTC?((tpC[m]/pTC)-1)*100:0; let tva=getActiveValue({cop:tpV[m],usd:tpU[m]}); let vtv=pTV?((tva/pTV)-1)*100:0; tB+='<td class="border p-2 text-right text-xs '+(vtc>=0?'text-green-600':'text-red-600')+'">'+vtc.toFixed(0)+'%</td><td class="border p-2 text-right text-xs '+(vtv>=0?'text-green-600':'text-red-600')+'">'+vtv.toFixed(0)+'%</td>';} pTC=tpC[m];pTV=getActiveValue({cop:tpV[m],usd:tpU[m]});}); tB+='</tr>';
+    } else if(selMonth!=='TODOS' && selCompare==='NINGUNO') {
+        let mInt=parseInt(selMonth);
+        tH='<tr><th class="border p-2 bg-gray-100">Producto</th><th class="border p-2 text-right bg-gray-100">Cajas '+getMonthLabel(mInt)+'</th><th class="border p-2 text-right bg-gray-100">Valor</th><th class="border p-2 text-right bg-gray-100">% Cajas</th><th class="border p-2 text-right bg-gray-100">% Valor</th></tr>';
+        let pd=tableProducts.map(p=>{let d=state.dataByProduct[p][mInt]||{cajas:0,valCOP:0,valUSD:0};return{name:p,cajas:d.cajas,valCOP:d.valCOP,valUSD:d.valUSD};});
+        pd.sort((a,b)=>b.cajas-a.cajas);
+        let tc=pd.reduce((s,x)=>s+x.cajas,0), tco=pd.reduce((s,x)=>s+x.valCOP,0), tu=pd.reduce((s,x)=>s+x.valUSD,0);
+        pd.forEach(p=>{let pctC=tc?(p.cajas/tc)*100:0,pctV=tco?(p.valCOP/tco)*100:0; tB+='<tr><td class="border p-2 font-bold text-xs">'+ROW_CHECKBOX+' '+p.name+'</td><td class="border p-2 text-right text-xs">'+formatNumber(p.cajas)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:p.valCOP,usd:p.valUSD})+'</td><td class="border p-2 text-right text-xs bg-indigo-50 font-bold text-indigo-700">'+pctC.toFixed(1)+'%</td><td class="border p-2 text-right text-xs bg-emerald-50 font-bold text-emerald-700">'+pctV.toFixed(1)+'%</td></tr>';});
+        tB+='<tr class="bg-gray-200 font-bold"><td class="border p-2">TOTAL</td><td class="border p-2 text-right text-xs">'+formatNumber(tc)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:tco,usd:tu})+'</td><td class="border p-2 text-right text-xs">100%</td><td class="border p-2 text-right text-xs">100%</td></tr>';
+    } else if(selMonth!=='TODOS' && selCompare!=='NINGUNO') {
+        let m1=parseInt(selMonth),m2=parseInt(selCompare);
+        tH='<tr><th class="border p-2 bg-gray-100">Producto</th><th class="border p-2 text-right bg-gray-100">Cajas '+getMonthLabel(m1)+'</th><th class="border p-2 text-right bg-gray-100">Valor '+getMonthLabel(m1)+'</th><th class="border p-2 text-right bg-gray-100">Cajas '+getMonthLabel(m2)+'</th><th class="border p-2 text-right bg-gray-100">Valor '+getMonthLabel(m2)+'</th><th class="border p-2 text-right bg-gray-100">Δ Cajas %</th><th class="border p-2 text-right bg-gray-100">Δ Valor %</th></tr>';
+        let pd=tableProducts.map(p=>{let d1=state.dataByProduct[p][m1]||{cajas:0,valCOP:0,valUSD:0},d2=state.dataByProduct[p][m2]||{cajas:0,valCOP:0,valUSD:0};return{name:p,c1:d1.cajas,v1:d1.valCOP,vu1:d1.valUSD,c2:d2.cajas,v2:d2.valCOP,vu2:d2.valUSD};});
+        pd.sort((a,b)=>b.c1-a.c1);
+        pd.forEach(p=>{let av1=getActiveValue({cop:p.v1,usd:p.vu1}),av2=getActiveValue({cop:p.v2,usd:p.vu2}); let vc=p.c1?((p.c2/p.c1)-1)*100:0,vv=av1?((av2/av1)-1)*100:0; tB+='<tr><td class="border p-2 font-bold text-xs">'+ROW_CHECKBOX+' '+p.name+'</td><td class="border p-2 text-right text-xs">'+formatNumber(p.c1)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:p.v1,usd:p.vu1})+'</td><td class="border p-2 text-right text-xs">'+formatNumber(p.c2)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:p.v2,usd:p.vu2})+'</td><td class="border p-2 text-right text-xs font-bold '+(vc>=0?'text-green-600':'text-red-600')+'">'+vc.toFixed(0)+'%</td><td class="border p-2 text-right text-xs font-bold '+(vv>=0?'text-green-600':'text-red-600')+'">'+vv.toFixed(0)+'%</td></tr>';});
+    } else { tH='<tr><th class="border p-2">Producto</th><th class="border p-2">Use los filtros</th></tr>'; tB='<tr><td colspan="2" class="text-center p-4 text-gray-500">Seleccione un mes para comparar.</td></tr>'; }
+    document.getElementById('tblProdHead').innerHTML=tH; document.getElementById('tblProdBody').innerHTML=tB;
+    let tfh=''; monthsAvailable.forEach(m=>{let mc=-1,bf='N/A',tcma=0; productos.forEach(p=>{let d=state.dataByProduct[p]&&state.dataByProduct[p][m]?state.dataByProduct[p][m]:{cajas:0}; tcma+=d.cajas; if(d.cajas>mc){mc=d.cajas;bf=p;}}); let pp=tcma>0?(mc/tcma)*100:0; tfh+='<div class="bg-amber-50 border border-amber-200 p-4 rounded shadow-sm text-center"><p class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">LÍDER '+getMonthLabel(m).toUpperCase()+'</p><h4 class="text-lg font-black text-amber-700 truncate" title="'+bf+'">'+bf+'</h4><p class="text-3xl font-bold text-slate-800 mt-2">'+pp.toFixed(0)+'%</p><p class="text-xs text-slate-500 mt-1">'+formatNumber(mc)+' cajas de '+formatNumber(tcma)+'</p></div>';});
+    document.getElementById('topFruitPerMonthContainer').innerHTML=tfh;
+}
+
+function onFilterChange(source) {
+    let selClient = document.getElementById('filterClient').value;
+    let selProd = document.getElementById('filterProduct').value;
+    let selMonth = document.getElementById('filterMonth').value;
+    let ctxFilter = (r) => { if (selMonth !== 'TODOS' && parseInt(r.MES)?.toString() !== selMonth) return false; return true; };
+    if (source === 'client') {
+        let fData = rawData.filter(r => { if (!ctxFilter(r)) return false; if (selClient !== 'TODOS' && r.TERCERO?.toString().trim() !== selClient) return false; return true; });
+        let cProds = [...new Set(fData.map(r => r['NOMBRE DE PRODUCTO A PROCESAR']?.toString().trim()))].filter(Boolean).sort();
+        let pH = '<option value="TODOS">TODOS LOS PRODUCTOS</option>'; cProds.forEach(p => pH += '<option value="'+p+'">'+p+'</option>');
+        document.getElementById('filterProduct').innerHTML = pH; if (cProds.includes(selProd)) document.getElementById('filterProduct').value = selProd;
+    } else if (source === 'product') {
+        let fData = rawData.filter(r => { if (!ctxFilter(r)) return false; if (selProd !== 'TODOS' && r['NOMBRE DE PRODUCTO A PROCESAR']?.toString().trim() !== selProd) return false; return true; });
+        let pClients = [...new Set(fData.map(r => r.TERCERO?.toString().trim()))].filter(Boolean).sort();
+        let cH = '<option value="TODOS">TODOS LOS CLIENTES</option>'; pClients.forEach(c => cH += '<option value="'+c+'">'+c+'</option>');
+        document.getElementById('filterClient').innerHTML = cH; if (pClients.includes(selClient)) document.getElementById('filterClient').value = selClient;
+    } else if (source === 'month') {
+        let mData = rawData.filter(ctxFilter);
+        let mClients = [...new Set(mData.map(r => r.TERCERO?.toString().trim()))].filter(Boolean).sort();
+        let mProds = [...new Set(mData.map(r => r['NOMBRE DE PRODUCTO A PROCESAR']?.toString().trim()))].filter(Boolean).sort();
+        let cH = '<option value="TODOS">TODOS LOS CLIENTES</option>'; mClients.forEach(c => cH += '<option value="'+c+'">'+c+'</option>');
+        document.getElementById('filterClient').innerHTML = cH; if (mClients.includes(selClient)) document.getElementById('filterClient').value = selClient;
+        let pH = '<option value="TODOS">TODOS LOS PRODUCTOS</option>'; mProds.forEach(p => pH += '<option value="'+p+'">'+p+'</option>');
+        document.getElementById('filterProduct').innerHTML = pH; if (mProds.includes(selProd)) document.getElementById('filterProduct').value = selProd;
+    }
+    renderClients();
+}
+
+function renderClients() {
+    let selClient=document.getElementById('filterClient').value||'TODOS', selProd=document.getElementById('filterProduct').value||'TODOS', selMonth=document.getElementById('filterMonth').value||'TODOS';
+    let contextData=rawData.filter(r=>{let mp=selProd==='TODOS'||r['NOMBRE DE PRODUCTO A PROCESAR']?.toString().trim()===selProd; let mm=selMonth==='TODOS'||parseInt(r.MES)?.toString()===selMonth; return mp&&mm;});
+    let filtered=selClient==='TODOS'?contextData:contextData.filter(r=>r.TERCERO?.toString().trim()===selClient);
+    let summary={}; filtered.forEach(r=>{let gk=selMonth!=='TODOS'?'Semana/Día Mes '+r.MES:getMonthLabel(parseInt(r.MES)); if(selClient!=='TODOS'&&selProd!=='TODOS'&&selMonth==='TODOS')gk=getMonthLabel(parseInt(r.MES)); else if(selClient!=='TODOS'&&selProd==='TODOS'&&selMonth==='TODOS')gk=getMonthLabel(parseInt(r.MES)); if(!summary[gk])summary[gk]={cajas:0,valCOP:0,valUSD:0}; let vals=getConverted(parseFloat(r.VALOR)||0,parseInt(r.MES)); summary[gk].cajas+=parseFloat(r.CANTIDAD)||0; summary[gk].valCOP+=vals.cop; summary[gk].valUSD+=vals.usd;});
+    let labels=Object.keys(summary).sort((a,b)=>{let mo=MONTH_NAMES.indexOf(a)-MONTH_NAMES.indexOf(b); if(mo!==0&&(MONTH_NAMES.indexOf(a)>0||a.startsWith('Mes')))return mo; return a.localeCompare(b);});
+    let dB=labels.map(l=>summary[l].cajas), dV=labels.map(l=>getActiveValue({cop:summary[l].valCOP,usd:summary[l].valUSD}));
+    let tgc=0,tgco=0,tgu=0,tB='';
+    labels.forEach((l,idx)=>{let vb=0,vv=0,vh='',vvh=''; tgc+=summary[l].cajas;tgco+=summary[l].valCOP;tgu+=summary[l].valUSD; if(idx>0){let pB=dB[idx-1],pV=dV[idx-1]; vb=pB?((dB[idx]/pB)-1)*100:0; vv=pV?((dV[idx]/pV)-1)*100:0; vh='<br><span class="text-[10px] font-bold '+(vb>=0?'text-green-600':'text-red-600')+'">('+(vb>=0?'+':'')+vb.toFixed(0)+'%)</span>'; vvh='<br><span class="text-[10px] font-bold '+(vv>=0?'text-green-600':'text-red-600')+'">('+(vv>=0?'+':'')+vv.toFixed(0)+'%)</span>';} tB+='<tr class="hover:bg-gray-50"><td class="border p-2 font-bold">'+ROW_CHECKBOX+' '+l+'</td><td class="border p-2 text-right">'+formatNumber(summary[l].cajas)+vh+'</td><td class="border p-2 text-right">'+renderValueCell({cop:summary[l].valCOP,usd:summary[l].valUSD})+vvh+'</td></tr>';});
+    if(labels.length===0)tB='<tr><td colspan="3" class="text-center p-4">No hay datos.</td></tr>'; else tB+='<tr class="bg-gray-200 font-bold"><td class="border p-2">TOTAL</td><td class="border p-2 text-right">'+formatNumber(tgc)+'</td><td class="border p-2 text-right">'+renderValueCell({cop:tgco,usd:tgu})+'</td></tr>';
+    document.getElementById('tblClientBody').innerHTML=tB;
+    let tgcpm={},tgcopm={},tguipm={}; monthsAvailable.forEach(m=>{tgcpm[m]=0;tgcopm[m]=0;tguipm[m]=0;}); let tgc2=0,tgco2=0,tgu2=0;
+    contextData.forEach(r=>{let m=parseInt(r.MES),q=parseFloat(r.CANTIDAD)||0; let vals=getConverted(parseFloat(r.VALOR)||0,m); tgc2+=q;tgco2+=vals.cop;tgu2+=vals.usd; tgcpm[m]+=q;tgcopm[m]+=vals.cop;tguipm[m]+=vals.usd;});
+    let rm={}; contextData.forEach(r=>{let c=r.TERCERO?.toString().trim()||'DESCONOCIDO',m=parseInt(r.MES); if(!rm[c])rm[c]={totalCajas:0,totalCop:0,totalUsd:0,months:{}}; if(!rm[c].months[m])rm[c].months[m]={cajas:0,cop:0,usd:0}; let q=parseFloat(r.CANTIDAD)||0,vals=getConverted(parseFloat(r.VALOR)||0,m); rm[c].totalCajas+=q;rm[c].totalCop+=vals.cop;rm[c].totalUsd+=vals.usd; rm[c].months[m].cajas+=q;rm[c].months[m].cop+=vals.cop;rm[c].months[m].usd+=vals.usd;});
+    let sC=Object.keys(rm).sort((a,b)=>getActiveValue({cop:rm[b].totalCop,usd:rm[b].totalUsd})-getActiveValue({cop:rm[a].totalCop,usd:rm[a].totalUsd}));
+    let mtr=selMonth==='TODOS'?monthsAvailable:[parseInt(selMonth)];
+    let tHR='<tr><th class="border p-2 z-10 bg-slate-700 sticky left-0 text-white" rowspan="2">Cliente</th>'; mtr.forEach(m=>tHR+='<th class="border p-2 text-center" colspan="4">'+getMonthLabel(m)+'</th>');
+    tHR+='<th class="border p-2 text-center bg-slate-800 text-white" colspan="2">TOTAL ACUMULADO</th></tr><tr>';
+    mtr.forEach(()=>{tHR+='<th class="border p-2 text-right text-xs">Cajas</th><th class="border p-2 text-right text-xs">Valor</th><th class="border p-2 text-right text-xs bg-indigo-50 text-indigo-700">% C</th><th class="border p-2 text-right text-xs bg-emerald-50 text-emerald-700">% V</th>';});
+    tHR+='<th class="border p-2 text-right text-xs bg-slate-800 text-white">Cajas Tot</th><th class="border p-2 text-right text-xs bg-slate-800 text-white">Valor Tot</th></tr>';
+    document.getElementById('tblRankingHead').innerHTML=tHR;
+    let tBR='';
+    sC.forEach((c,idx)=>{let isSel=(selClient!=='TODOS'&&selClient===c); let rc=isSel?'bg-amber-100 font-bold':'hover:bg-slate-50'; let sc=isSel?'bg-amber-100':'bg-white';
+    tBR+='<tr class="'+rc+'"><td class="border p-2 text-xs sticky left-0 '+sc+' shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">'+ROW_CHECKBOX+' '+(idx+1)+'. '+c+'</td>';
+    mtr.forEach(m=>{let d=rm[c].months[m]||{cajas:0,cop:0,usd:0}; tBR+='<td class="border p-2 text-right text-xs">'+formatNumber(d.cajas)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:d.cop,usd:d.usd})+'</td>'; let tcm=tgcpm[m]||0; let tvm=getActiveValue({cop:tgcopm[m],usd:tguipm[m]})||0; let avc=getActiveValue({cop:d.cop,usd:d.usd}); let pcm=tcm?(d.cajas/tcm)*100:0; let pvm=tvm?(avc/tvm)*100:0; tBR+='<td class="border p-2 text-right text-xs bg-indigo-50 font-bold text-indigo-700">'+pcm.toFixed(0)+'%</td><td class="border p-2 text-right text-xs bg-emerald-50 font-bold text-emerald-700">'+pvm.toFixed(0)+'%</td>';});
+    tBR+='<td class="border p-2 text-right text-xs bg-slate-100 font-bold">'+formatNumber(rm[c].totalCajas)+'</td><td class="border p-2 text-right text-xs bg-slate-100 font-bold">'+renderValueCell({cop:rm[c].totalCop,usd:rm[c].totalUsd})+'</td></tr>';});
+    document.getElementById('tblRankingBody').innerHTML=tBR;
+    let pC=tgc2?(tgc/tgc2)*100:0; let vca=getActiveValue({cop:tgco,usd:tgu}); let vga=getActiveValue({cop:tgco2,usd:tgu2}); let pV=vga?(vca/vga)*100:0;
+    document.getElementById('clientPartContainer').innerHTML='<div class="col-span-full bg-slate-800 text-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-center mb-2"><div><h3 class="text-lg font-bold text-amber-400">RESUMEN DE FILTROS</h3><p class="text-sm">Cliente: <span class="font-bold">'+selClient+'</span> | Producto: <span class="font-bold">'+selProd+'</span> | Mes: <span class="font-bold">'+(selMonth==='TODOS'?'TODOS':getMonthLabel(parseInt(selMonth)))+'</span></p></div><div class="text-right mt-2 md:mt-0"><p class="text-xs text-slate-400">Total General: '+renderValueCell({cop:tgco2,usd:tgu2})+'</p></div></div><div class="bg-indigo-50 border border-indigo-200 p-6 rounded shadow-sm text-center"><p class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">% CAJAS</p><h3 class="text-4xl font-black text-indigo-700">'+pC.toFixed(0)+'%</h3><p class="text-xs text-slate-500 mt-2">'+formatNumber(tgc)+' de '+formatNumber(tgc2)+'</p></div><div class="bg-emerald-50 border border-emerald-200 p-6 rounded shadow-sm text-center"><p class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">% VALOR</p><h3 class="text-4xl font-black text-emerald-700">'+pV.toFixed(0)+'%</h3><p class="text-xs text-slate-500 mt-2">'+renderValueCell({cop:tgco,usd:tgu})+' sobre '+renderValueCell({cop:tgco2,usd:tgu2})+'</p></div>';
+    buildChart('chartTab3','bar',labels,[{label:'Volumen (Cajas)',data:dB,backgroundColor:'#8b5cf6',yAxisID:'y'},{label:'Valor ($)',data:dV,type:'line',borderColor:'#3b82f6',fill:false,yAxisID:'y1'}],true);
+}
+
+function renderDynamicExplorer() {
+    const client=document.getElementById('selectDynamicClient').value; if(!client)return;
+    let data=state.dataByClient[client]; if(!data)return;
+    let tB='',prods=Object.keys(data.products).sort(); let cbh=[],cvh=[]; let tec=0,teco=0,teu=0;
+    monthsAvailable.forEach(m=>{let md=data.months[m]||{cajas:0,valCOP:0,valUSD:0}; cbh.push(md.cajas); cvh.push(getActiveValue({cop:md.valCOP,usd:md.valUSD}));});
+    prods.forEach(p=>{monthsAvailable.forEach(m=>{let d=data.products[p][m]; if(d&&(d.cajas!==0||d.valCOP!==0)){tec+=d.cajas;teco+=d.valCOP;teu+=d.valUSD; tB+='<tr><td class="border p-2 font-bold text-xs">'+ROW_CHECKBOX+' '+p+'</td><td class="border p-2 text-center text-xs">'+getMonthLabel(m)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(d.cajas)+'</td><td class="border p-2 text-right text-xs">'+renderValueCell({cop:d.valCOP,usd:d.valUSD})+'</td></tr>';}});});
+    tB+='<tr class="bg-gray-200 font-bold"><td class="border p-2" colspan="2">TOTAL '+client+'</td><td class="border p-2 text-right">'+formatNumber(tec)+'</td><td class="border p-2 text-right">'+renderValueCell({cop:teco,usd:teu})+'</td></tr>';
+    document.getElementById('tblDynamicClient').innerHTML=tB;
+    let ml=monthsAvailable.map(m=>getMonthLabel(m));
+    buildChart('chartDynamicClient','bar',ml,[{label:'Cajas',data:cbh,backgroundColor:'#3b82f6',yAxisID:'y'},{label:'Valor',data:cvh,type:'line',borderColor:'#ef4444',fill:false,yAxisID:'y1'}],true);
+}
+
+function renderSaldos() {
+    let sedes=Object.keys(state.dataBySede).sort(); let ml=monthsAvailable.map(m=>getMonthLabel(m));
+    let tc=0,tsc=0,tfc=0; sedes.forEach(s=>{monthsAvailable.forEach(m=>{let d=state.dataBySede[s][m]||{cajas:0,saldoCajas:0,fullCajas:0}; tc+=d.cajas;tsc+=d.saldoCajas;tfc+=d.fullCajas;});});
+    let psg=tc?(tsc/tc)*100:0;
+    document.getElementById('saldoResumenCards').innerHTML='<div class="bg-gradient-to-r from-slate-600 to-slate-700 text-white p-6 rounded-lg shadow-lg text-center"><p class="text-xs font-bold uppercase tracking-widest mb-2 text-slate-200">TOTAL CAJAS</p><h3 class="text-3xl font-black">'+formatNumber(tc)+'</h3><p class="text-xs text-slate-200 mt-2">Todas las sedes</p></div><div class="bg-gradient-to-r from-red-600 to-red-700 text-white p-6 rounded-lg shadow-lg text-center"><p class="text-xs font-bold uppercase tracking-widest mb-2 text-red-200">CAJAS CON SALDO</p><h3 class="text-3xl font-black">'+formatNumber(tsc)+'</h3><p class="text-xs text-red-200 mt-2">'+psg.toFixed(1)+'% del total</p></div><div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-lg shadow-lg text-center"><p class="text-xs font-bold uppercase tracking-widest mb-2 text-green-200">CAJAS VENTA FULL</p><h3 class="text-3xl font-black">'+formatNumber(tfc)+'</h3><p class="text-xs text-green-200 mt-2">'+(100-psg).toFixed(1)+'% del total</p></div>';
+    let tH='<tr><th class="border p-2 bg-gray-100">Sede</th>'; monthsAvailable.forEach(m=>tH+='<th class="border p-2 text-center bg-gray-50" colspan="4">'+getMonthLabel(m)+'</th>'); tH+='<th class="border p-2 text-center bg-slate-200" colspan="4">TOTAL ACUMULADO</th></tr>';
+    tH+='<tr><th class="border p-2 bg-gray-100"></th>'; monthsAvailable.forEach(()=>{tH+='<th class="border p-2 text-right text-xs">Cajas Total</th><th class="border p-2 text-right text-xs">Cajas Full</th><th class="border p-2 text-right text-xs">Cajas Saldo</th><th class="border p-2 text-right text-xs">% Saldo</th>';}); tH+='<th class="border p-2 text-right text-xs bg-slate-200">Cajas Total</th><th class="border p-2 text-right text-xs bg-slate-200">Cajas Full</th><th class="border p-2 text-right text-xs bg-slate-200">Cajas Saldo</th><th class="border p-2 text-right text-xs bg-slate-200">% Saldo</th></tr>';
+    document.getElementById('tblSaldosHead').innerHTML=tH;
+    let tB=''; let gtc=0,gfc=0,gsc=0;
+    sedes.forEach(s=>{tB+='<tr><td class="border p-2 font-bold text-xs">'+ROW_CHECKBOX+' '+s+'</td>'; let ac=0,af=0,as=0; monthsAvailable.forEach(m=>{let d=state.dataBySede[s][m]||{cajas:0,fullCajas:0,saldoCajas:0}; ac+=d.cajas;af+=d.fullCajas;as+=d.saldoCajas; let pct=d.cajas?(d.saldoCajas/d.cajas)*100:0; let bg=pct===0?'text-gray-400':pct<10?'bg-green-50 text-green-700':pct<30?'bg-yellow-50 text-yellow-700':'bg-red-50 text-red-700'; tB+='<td class="border p-2 text-right text-xs">'+formatNumber(d.cajas)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(d.fullCajas)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(d.saldoCajas)+'</td><td class="border p-2 text-right text-xs font-bold '+bg+'">'+pct.toFixed(1)+'%</td>';}); let pa=ac?(as/ac)*100:0; tB+='<td class="border p-2 text-right text-xs bg-slate-100 font-bold">'+formatNumber(ac)+'</td><td class="border p-2 text-right text-xs bg-slate-100 font-bold">'+formatNumber(af)+'</td><td class="border p-2 text-right text-xs bg-slate-100 font-bold">'+formatNumber(as)+'</td><td class="border p-2 text-right text-xs bg-slate-100 font-bold '+(pa>30?'text-red-600':pa>10?'text-yellow-600':'text-green-600')+'">'+pa.toFixed(1)+'%</td></tr>'; gtc+=ac;gfc+=af;gsc+=as;});
+    let pg=gtc?(gsc/gtc)*100:0; tB+='<tr class="bg-slate-300 font-bold"><td class="border p-2">TOTAL</td>'; monthsAvailable.forEach(m=>{let tcm2=0,tfm=0,tsm=0; sedes.forEach(s=>{let d=state.dataBySede[s][m]||{}; tcm2+=d.cajas||0;tfm+=d.fullCajas||0;tsm+=d.saldoCajas||0;}); let pct=tcm2?(tsm/tcm2)*100:0; tB+='<td class="border p-2 text-right text-xs">'+formatNumber(tcm2)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(tfm)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(tsm)+'</td><td class="border p-2 text-right text-xs">'+pct.toFixed(1)+'%</td>';}); tB+='<td class="border p-2 text-right text-xs">'+formatNumber(gtc)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(gfc)+'</td><td class="border p-2 text-right text-xs">'+formatNumber(gsc)+'</td><td class="border p-2 text-right text-xs">'+pg.toFixed(1)+'%</td></tr>';
+    document.getElementById('tblSaldosBody').innerHTML=tB;
+    let tHP='<tr><th class="border p-2 bg-gray-100">Sede</th>'; monthsAvailable.forEach(m=>tHP+='<th class="border p-2 text-center text-xs">'+getMonthLabel(m)+'</th>'); tHP+='<th class="border p-2 text-center bg-slate-200 text-xs">% Promedio</th></tr>';
+    document.getElementById('tblSaldosPctHead').innerHTML=tHP;
+    let tBP=''; sedes.forEach(s=>{let sp=0,cm=0; tBP+='<tr><td class="border p-2 font-bold text-xs">'+ROW_CHECKBOX+' '+s+'</td>'; monthsAvailable.forEach(m=>{let d=state.dataBySede[s][m]||{cajas:0,saldoCajas:0}; let pct=d.cajas>0?(d.saldoCajas/d.cajas)*100:0; sp+=pct;cm++; let bg=pct===0?'text-gray-400':pct<10?'bg-green-50 text-green-700':pct<30?'bg-yellow-50 text-yellow-700':'bg-red-50 text-red-700'; tBP+='<td class="border p-2 text-right text-xs font-bold '+bg+'">'+pct.toFixed(1)+'%</td>';}); let ap=cm>0?sp/cm:0; tBP+='<td class="border p-2 text-right text-xs bg-slate-100 font-bold">'+ap.toFixed(1)+'%</td></tr>';});
+    document.getElementById('tblSaldosPctBody').innerHTML=tBP;
+    let dsS=[],colors=['#3b82f6','#f59e0b','#10b981','#8b5cf6','#ec4899','#6366f1','#ef4444'];
+    sedes.forEach((s,i)=>{let dp=monthsAvailable.map(m=>{let d=state.dataBySede[s][m]||{cajas:0,saldoCajas:0};return d.cajas>0?(d.saldoCajas/d.cajas)*100:0;}); dsS.push({label:s+' (% Saldo Cajas)',data:dp,borderColor:colors[i%colors.length],backgroundColor:colors[i%colors.length],fill:false,tension:0.1});});
+    buildChart('chartSaldos','line',ml,dsS,false);
+}
+
+function buildChart(canvasId,type,labels,datasets,dualAxis) {
+    if(charts[canvasId])charts[canvasId].destroy();
+    const ctx=document.getElementById(canvasId).getContext('2d');
+    let hasPctAxis=datasets.some(d=>d.label&&d.label.includes('%'));
+    let options={responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:canvasId==='chartProducts'?{boxWidth:12,padding:8,font:{size:10}}:{}},datalabels:{display:function(c){if(canvasId==='chartProducts'&&datasets.length>8)return false;let v=c.dataset.data[c.dataIndex];return(v!==0&&v!==null&&v!==undefined)?'auto':false;},color:function(c){return Chart.defaults.color;},anchor:'end',align:function(c){return c.dataset.type==='line'?'bottom':'top';},offset:4,backgroundColor:function(c){return Chart.defaults.color==='#f8fafc'?'rgba(15,23,42,0.85)':'rgba(255,255,255,0.85)';},borderRadius:4,padding:2,formatter:function(v,c){if(v===null||v===undefined)return'';let l=c.dataset.label||'';if(l.includes('%')||l.includes('Saldo'))return v.toFixed(1)+'%';if(l.includes('Valor')||l.includes('$'))return '$'+formatNumber(v);return formatNumber(v);},font:{weight:'bold',size:9}}}};
+    if(dualAxis&&type!=='doughnut'&&type!=='pie'){options.scales={y:{type:'linear',display:true,position:'left',beginAtZero:true},y1:{type:'linear',display:true,position:'right',grid:{drawOnChartArea:false},ticks:hasPctAxis?{callback:function(v){return v.toFixed(0)+'%';}}:{}}};}
+    charts[canvasId]=new Chart(ctx,{type,data:{labels,datasets},options});
+}
+
+function downloadChart(canvasId,name,theme='light') {
+    const chart=charts[canvasId]; if(!chart)return;
+    const oc=Chart.defaults.color; const olc=chart.options.plugins?.legend?.labels?.color; const or=chart.options.devicePixelRatio||window.devicePixelRatio;
+    let tc=theme==='dark'?'#f8fafc':'#1e293b', bg=theme==='dark'?'#0f172a':'#ffffff', gc=theme==='dark'?'#334155':'#e2e8f0';
+    Chart.defaults.color=tc; if(chart.options.plugins?.legend?.labels)chart.options.plugins.legend.labels.color=tc; chart.options.devicePixelRatio=4;
+    if(chart.options.scales){Object.keys(chart.options.scales).forEach(a=>{if(chart.options.scales[a].ticks)chart.options.scales[a].ticks.color=tc;if(chart.options.scales[a].grid)chart.options.scales[a].grid.color=gc;});}
+    chart.update('none');
+    const canvas=document.getElementById(canvasId); const tc2=document.createElement('canvas'); tc2.width=canvas.width; tc2.height=canvas.height; const ctx=tc2.getContext('2d');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,tc2.width,tc2.height); ctx.drawImage(canvas,0,0);
+    let fc=getFilterContext(); ctx.font='bold 16px Segoe UI'; ctx.fillStyle=tc; ctx.textAlign='left'; ctx.fillText(name.replace(/_/g,' ')+' - '+fc,10,21);
+    const link=document.createElement('a'); link.download=name+'_'+theme.toUpperCase()+'_'+new Date().toISOString().slice(0,10)+'.jpg'; link.href=tc2.toDataURL('image/jpeg',1.0); link.click();
+    Chart.defaults.color=oc; if(chart.options.plugins?.legend?.labels)chart.options.plugins.legend.labels.color=olc; chart.options.devicePixelRatio=or;
+    if(chart.options.scales){Object.keys(chart.options.scales).forEach(a=>{if(chart.options.scales[a].ticks)chart.options.scales[a].ticks.color=oc;if(chart.options.scales[a].grid)chart.options.scales[a].grid.color='#e2e8f0';});}
+    chart.update('none');
+}
+
+async function downloadTableImage(containerId,name,theme='light') {
+    const el=document.getElementById(containerId); let hr=[];
+    el.querySelectorAll('tbody').forEach(tb=>{const cbs=tb.querySelectorAll('.row-selector');const ac=Array.from(cbs).some(cb=>cb.checked);if(ac){cbs.forEach(cb=>{if(!cb.checked){const tr=cb.closest('tr');hr.push({tr,d:tr.style.display});tr.style.display='none';}});}});
+    let of=el.style.filter,ob=el.style.backgroundColor,oh=el.style.height,omh=el.style.maxHeight,ov=el.style.overflow;
+    el.style.setProperty('height','auto','important');el.style.setProperty('max-height','none','important');el.style.setProperty('overflow','visible','important');
+    if(theme==='dark'){el.style.filter='invert(0.9) hue-rotate(180deg)';el.style.backgroundColor='#0f172a';}else{el.style.backgroundColor='#ffffff';}
+    const wrapper=document.createElement('div'); wrapper.style.padding='20px'; wrapper.style.backgroundColor=theme==='dark'?'#0f172a':'#ffffff';
+    const titleEl=document.createElement('div'); titleEl.style.fontSize='14px'; titleEl.style.fontWeight='bold'; titleEl.style.color=theme==='dark'?'#f8fafc':'#1e293b'; titleEl.style.marginBottom='10px'; titleEl.innerText=name.replace(/_/g,' ')+' | '+getFilterContext();
+    wrapper.appendChild(titleEl); const clone=el.cloneNode(true); clone.style.filter=''; wrapper.appendChild(clone); document.body.appendChild(wrapper);
+    const canvas=await html2canvas(wrapper,{scale:2,backgroundColor:theme==='dark'?'#0f172a':'#ffffff',width:wrapper.scrollWidth,height:wrapper.scrollHeight,windowWidth:wrapper.scrollWidth});
+    document.body.removeChild(wrapper);
+    el.style.filter=of;el.style.backgroundColor=ob;el.style.height=oh;el.style.maxHeight=omh;el.style.overflow=ov; hr.forEach(i=>{i.tr.style.display=i.d;});
+    const link=document.createElement('a'); link.download='TABLA_'+name+'_'+theme.toUpperCase()+'_'+new Date().toISOString().slice(0,10)+'.jpg'; link.href=canvas.toDataURL('image/jpeg',1.0); link.click();
+}
+
+function switchTab(tabId,btn){activeTabId=tabId;document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).style.display='block';btn.classList.add('active');if(tabId==='tab-explorador'&&document.getElementById('selectDynamicClient').value)renderDynamicExplorer();scheduleWideTableFit();}
+
+function showPDFModal(){document.getElementById('pdfModal').classList.remove('hidden');}
+function closePDFModal(){document.getElementById('pdfModal').classList.add('hidden');}
+
+async function exportToPDFFinal(mode){
+    closePDFModal(); const {jsPDF}=window.jspdf; let els=[];
+    if(mode==='current'){els=[document.getElementById(activeTabId)];}else{document.querySelectorAll('.tab-content').forEach(c=>c.style.display='block');els=Array.from(document.querySelectorAll('.tab-content'));}
+    let pdf=null;
+    for(let i=0;i<els.length;i++){const el=els[i];const od=el.style.display;el.style.display='block';const isWide=el.scrollWidth>900;const orient=isWide?'l':'p';
+    if(!pdf){pdf=new jsPDF(orient,'pt','letter');}else{pdf.addPage();}
+    const canvas=await html2canvas(el,{scale:1.5,useCORS:true,backgroundColor:'#ffffff',width:el.scrollWidth,height:el.scrollHeight,windowWidth:el.scrollWidth});
+    const imgData=canvas.toDataURL('image/jpeg',0.95); const pw=pdf.internal.pageSize.getWidth()-40; const ph=(canvas.height*pw)/canvas.width;
+    let pos=20; let hl=ph; const pgh=pdf.internal.pageSize.getHeight();
+    pdf.addImage(imgData,'JPEG',20,pos,pw,ph); hl-=pgh;
+    while(hl>0){pos=hl-ph;pdf.addPage();pdf.addImage(imgData,'JPEG',20,pos,pw,ph);hl-=pgh;}
+    if(mode!=='current')el.style.display=od;}
+    if(mode!=='current'){document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');document.getElementById(activeTabId).style.display='block';}
+    pdf.save('Informe_Gerencial_BI_Mensual.pdf');
+}
+</script>
+</body>
+</html>

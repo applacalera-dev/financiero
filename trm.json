@@ -1,0 +1,18 @@
+{
+  "_instrucciones": "Para agregar una TRM, reemplace null por el valor numerico del mes. No use puntos de miles; use punto solo para los decimales. Ejemplo: 3250.75",
+  "year": 2026,
+  "trm": {
+    "enero": 3670.47,
+    "febrero": 3766.30,
+    "marzo": 3669.96,
+    "abril": 3621.86,
+    "mayo": 3678.15,
+    "junio": 3443.59,
+    "julio": 3132.42,
+    "agosto": 3202.79,
+    "septiembre": null,
+    "octubre": null,
+    "noviembre": null,
+    "diciembre": null
+  }
+}

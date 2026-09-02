@@ -1,0 +1,12 @@
+# Ignorar todo por defecto: este repositorio solo publica la aplicación web.
+*
+
+# Archivos públicos permitidos.
+!.gitignore
+!README.md
+!index.html
+!GENERADOR DE INFORMES MENSUAL 2026.html
+!trm.json
+!.github/
+!.github/workflows/
+!.github/workflows/pages.yml
